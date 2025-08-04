@@ -1,0 +1,230 @@
+{% extends 'base.html' %}
+
+{% block title %}MQTT客户端 - 首页{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 命令按钮区域 -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-play-circle"></i> 快捷命令
+                </h5>
+                <a href="{% url 'admin_panel' %}" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-plus"></i> 添加命令
+                </a>
+            </div>
+            <div class="card-body">
+                {% if commands %}
+                    <div class="command-grid">
+                        {% for command in commands %}
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title">{{ command.name }}</h6>
+                                    <p class="card-text text-muted small">
+                                        <strong>主题:</strong> {{ command.topic }}<br>
+                                        {% if command.description %}
+                                            {{ command.description }}
+                                        {% endif %}
+                                    </p>
+                                    <button class="btn {{ command.button_color }} btn-sm w-100" 
+                                            onclick="executeCommand({{ command.id }}, '{{ command.name }}')">
+                                        <i class="fas fa-paper-plane"></i> 执行
+                                    </button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-robot fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">暂无快捷命令</p>
+                        <a href="{% url 'admin_panel' %}" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> 创建第一个命令
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 消息日志区域 -->
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-history"></i> 最近消息
+                </h5>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshMessages()">
+                    <i class="fas fa-sync-alt"></i> 刷新
+                </button>
+            </div>
+            <div class="card-body message-log" id="messageLog">
+                {% if recent_messages %}
+                    {% for message in recent_messages %}
+                        <div class="p-2 mb-2 rounded {% if message.message_type == 'sent' %}sent-message{% else %}received-message{% endif %}">
+                            <div class="d-flex justify-content-between">
+                                <small class="fw-bold">{{ message.topic }}</small>
+                                <small class="text-muted">
+                                    {% if message.message_type == 'sent' %}
+                                        <i class="fas fa-arrow-up"></i>
+                                    {% else %}
+                                        <i class="fas fa-arrow-down"></i>
+                                    {% endif %}
+                                    {{ message.timestamp|date:"H:i:s" }}
+                                </small>
+                            </div>
+                            <div class="small mt-1">{{ message.payload }}</div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-inbox"></i><br>
+                        暂无消息记录
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 快速发送消息面板 -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="fas fa-paper-plane"></i> 快速发送消息
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-4">
+                <input type="text" class="form-control" id="quickTopic" placeholder="主题 (如: LED_TEST)">
+            </div>
+            <div class="col-md-6">
+                <input type="text" class="form-control" id="quickPayload" placeholder="消息内容 (如: {&quot;msg&quot;:&quot;ON&quot;})">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100" onclick="sendQuickMessage()">
+                    <i class="fas fa-send"></i> 发送
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 执行命令
+    function executeCommand(commandId, commandName) {
+        fetch(`/execute-command/${commandId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage(`命令 "${commandName}" 执行成功`, 'success');
+                refreshMessages();
+            } else {
+                showMessage(data.message || '命令执行失败', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('执行命令失败:', error);
+            showMessage('网络错误，请重试', 'danger');
+        });
+    }
+
+    // 发送快速消息
+    function sendQuickMessage() {
+        const topic = document.getElementById('quickTopic').value.trim();
+        const payload = document.getElementById('quickPayload').value.trim();
+        
+        if (!topic) {
+            showMessage('请输入主题', 'warning');
+            return;
+        }
+        
+        if (!payload) {
+            showMessage('请输入消息内容', 'warning');
+            return;
+        }
+        
+        fetch('/send-mqtt-message/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                topic: topic,
+                payload: payload
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage('消息发送成功', 'success');
+                document.getElementById('quickTopic').value = '';
+                document.getElementById('quickPayload').value = '';
+                refreshMessages();
+            } else {
+                showMessage(data.message || '消息发送失败', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('发送消息失败:', error);
+            showMessage('网络错误，请重试', 'danger');
+        });
+    }
+
+    // 刷新消息列表
+    function refreshMessages() {
+        fetch('/api/messages/')
+            .then(response => response.json())
+            .then(data => {
+                const messageLog = document.getElementById('messageLog');
+                messageLog.innerHTML = '';
+                
+                if (data.messages.length === 0) {
+                    messageLog.innerHTML = `
+                        <div class="text-center text-muted py-3">
+                            <i class="fas fa-inbox"></i><br>
+                            暂无消息记录
+                        </div>
+                    `;
+                    return;
+                }
+                
+                data.messages.forEach(message => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `p-2 mb-2 rounded ${message.message_type === 'sent' ? 'sent-message' : 'received-message'}`;
+                    messageDiv.innerHTML = `
+                        <div class="d-flex justify-content-between">
+                            <small class="fw-bold">${message.topic}</small>
+                            <small class="text-muted">
+                                ${message.message_type === 'sent' ? '<i class="fas fa-arrow-up"></i>' : '<i class="fas fa-arrow-down"></i>'}
+                                ${message.timestamp}
+                            </small>
+                        </div>
+                        <div class="small mt-1">${message.payload}</div>
+                    `;
+                    messageLog.appendChild(messageDiv);
+                });
+            })
+            .catch(error => {
+                console.error('刷新消息失败:', error);
+            });
+    }
+
+    // 页面加载完成后自动刷新消息
+    document.addEventListener('DOMContentLoaded', function() {
+        refreshMessages();
+        // 每10秒自动刷新一次消息
+        setInterval(refreshMessages, 10000);
+    });
+</script>
+{% endblock %}

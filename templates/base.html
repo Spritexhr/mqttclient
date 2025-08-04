@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MQTT客户端{% endblock %}</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .mqtt-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        .message-log {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .command-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        .sent-message {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+        .received-message {
+            background-color: #e8f5e8;
+            border-left: 4px solid #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <!-- MQTT状态指示器 -->
+    <div class="mqtt-status">
+        <span class="badge" id="mqttStatus">
+            <i class="fas fa-circle"></i> 连接状态检查中...
+        </span>
+    </div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{% url 'home' %}">
+                <i class="fas fa-wifi"></i> MQTT客户端
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{% url 'home' %}">
+                    <i class="fas fa-home"></i> 首页
+                </a>
+                <a class="nav-link" href="{% url 'admin_panel' %}">
+                    <i class="fas fa-cogs"></i> 管理面板
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 消息提示 -->
+    {% if messages %}
+        <div class="container mt-3">
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <!-- 主要内容 -->
+    <div class="container mt-4">
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 更新MQTT状态
+        function updateMqttStatus() {
+            fetch('/api/mqtt-status/')
+                .then(response => response.json())
+                .then(data => {
+                    const statusElement = document.getElementById('mqttStatus');
+                    if (data.connected) {
+                        statusElement.className = 'badge bg-success';
+                        statusElement.innerHTML = '<i class="fas fa-check-circle"></i> MQTT已连接';
+                    } else {
+                        statusElement.className = 'badge bg-danger';
+                        statusElement.innerHTML = '<i class="fas fa-times-circle"></i> MQTT未连接';
+                    }
+                })
+                .catch(error => {
+                    console.error('获取MQTT状态失败:', error);
+                    const statusElement = document.getElementById('mqttStatus');
+                    statusElement.className = 'badge bg-warning';
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 状态未知';
+                });
+        }
+
+        // 每5秒更新一次状态
+        updateMqttStatus();
+        setInterval(updateMqttStatus, 5000);
+
+        // 显示操作结果消息
+        function showMessage(message, type = 'success') {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            const container = document.querySelector('.container');
+            container.insertBefore(alertDiv, container.firstChild);
+            
+            // 3秒后自动消失
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 3000);
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

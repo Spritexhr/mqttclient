@@ -1,0 +1,440 @@
+{% extends 'base.html' %}
+
+{% block title %}MQTT客户端 - 管理面板{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 命令管理区域 -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-list"></i> 命令管理
+                </h5>
+                <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addCommandModal">
+                    <i class="fas fa-plus"></i> 添加命令
+                </button>
+            </div>
+            <div class="card-body">
+                {% if commands %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>名称</th>
+                                    <th>主题</th>
+                                    <th>消息内容</th>
+                                    <th>描述</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for command in commands %}
+                                    <tr>
+                                        <td>
+                                            <span class="badge {{ command.button_color }}">{{ command.name }}</span>
+                                        </td>
+                                        <td><code>{{ command.topic }}</code></td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-secondary" 
+                                                    onclick="showPayload('{{ command.payload|escapejs }}')">
+                                                查看内容
+                                            </button>
+                                        </td>
+                                        <td>{{ command.description|default:"-" }}</td>
+                                        <td>{{ command.created_at|date:"m-d H:i" }}</td>
+                                        <td>
+                                            <button class="btn btn-success btn-sm" 
+                                                    onclick="executeCommand({{ command.id }}, '{{ command.name }}')">
+                                                <i class="fas fa-play"></i>
+                                            </button>
+                                            <a href="{% url 'delete_command' command.id %}" 
+                                               class="btn btn-danger btn-sm"
+                                               onclick="return confirm('确定要删除命令 \"{{ command.name }}\" 吗？')">
+                                                <i class="fas fa-trash"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-robot fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">暂无命令</p>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCommandModal">
+                            <i class="fas fa-plus"></i> 创建第一个命令
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 连接状态和订阅管理 -->
+    <div class="col-lg-4">
+        <!-- MQTT连接状态 -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-wifi"></i> MQTT连接状态
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge {% if mqtt_connected %}bg-success{% else %}bg-danger{% endif %} me-2">
+                        {% if mqtt_connected %}
+                            <i class="fas fa-check-circle"></i> 已连接
+                        {% else %}
+                            <i class="fas fa-times-circle"></i> 未连接
+                        {% endif %}
+                    </span>
+                </div>
+                
+                <!-- 订阅的主题 -->
+                <div class="mt-3">
+                    <h6 class="mb-2">已订阅主题:</h6>
+                    {% if subscribed_topics %}
+                        <div class="list-group list-group-flush">
+                            {% for topic in subscribed_topics %}
+                                <div class="list-group-item d-flex justify-content-between align-items-center py-2">
+                                    <code>{{ topic }}</code>
+                                    <button class="btn btn-sm btn-outline-danger" 
+                                            onclick="unsubscribeTopic('{{ topic }}')">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted small">暂无订阅主题</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 订阅新主题 -->
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">
+                    <i class="fas fa-plus-circle"></i> 订阅新主题
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="input-group">
+                    <input type="text" class="form-control" id="newTopic" placeholder="输入主题名称">
+                    <button class="btn btn-primary" onclick="subscribeTopic()">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 消息监控区域 -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="fas fa-chart-line"></i> 消息监控
+        </h5>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="refreshMessages()">
+                <i class="fas fa-sync-alt"></i> 刷新
+            </button>
+            <button class="btn btn-outline-danger btn-sm" onclick="clearMessages()">
+                <i class="fas fa-trash"></i> 清空
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="message-log" id="messageLog" style="max-height: 500px; overflow-y: auto;">
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="p-3 mb-2 rounded {% if message.message_type == 'sent' %}sent-message{% else %}received-message{% endif %}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <strong><code>{{ message.topic }}</code></strong>
+                                    <small class="text-muted">
+                                        {% if message.message_type == 'sent' %}
+                                            <i class="fas fa-arrow-up text-primary"></i>
+                                        {% else %}
+                                            <i class="fas fa-arrow-down text-success"></i>
+                                        {% endif %}
+                                        {{ message.timestamp|date:"Y-m-d H:i:s" }}
+                                    </small>
+                                </div>
+                                <div class="small">
+                                    <pre class="mb-0" style="white-space: pre-wrap;">{{ message.payload }}</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="fas fa-inbox fa-3x mb-3"></i>
+                    <p>暂无消息记录</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 添加命令模态框 -->
+<div class="modal fade" id="addCommandModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus"></i> 添加新命令
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{% url 'add_command' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">命令名称 *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="button_color" class="form-label">按钮颜色</label>
+                                <select class="form-select" id="button_color" name="button_color">
+                                    <option value="btn-primary">蓝色 (Primary)</option>
+                                    <option value="btn-success">绿色 (Success)</option>
+                                    <option value="btn-warning">黄色 (Warning)</option>
+                                    <option value="btn-danger">红色 (Danger)</option>
+                                    <option value="btn-info">青色 (Info)</option>
+                                    <option value="btn-secondary">灰色 (Secondary)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="topic" class="form-label">MQTT主题 *</label>
+                        <input type="text" class="form-control" id="topic" name="topic" 
+                               placeholder="例如: LED_CONTROL" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="payload" class="form-label">消息内容 *</label>
+                        <textarea class="form-control" id="payload" name="payload" rows="4" 
+                                  placeholder='例如: {"action": "ON"}' required></textarea>
+                        <div class="form-text">支持JSON格式或普通文本</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="description" class="form-label">描述</label>
+                        <textarea class="form-control" id="description" name="description" rows="2" 
+                                  placeholder="可选：描述此命令的用途"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 保存命令
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 查看消息内容模态框 -->
+<div class="modal fade" id="payloadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-eye"></i> 消息内容
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="payloadContent" style="white-space: pre-wrap; word-break: break-all;"></pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 执行命令
+    function executeCommand(commandId, commandName) {
+        fetch(`/execute-command/${commandId}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage(`命令 "${commandName}" 执行成功`, 'success');
+                refreshMessages();
+            } else {
+                showMessage(data.message || '命令执行失败', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('执行命令失败:', error);
+            showMessage('网络错误，请重试', 'danger');
+        });
+    }
+
+    // 订阅主题
+    function subscribeTopic() {
+        const topic = document.getElementById('newTopic').value.trim();
+        
+        if (!topic) {
+            showMessage('请输入主题名称', 'warning');
+            return;
+        }
+        
+        fetch('/subscribe-topic/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ topic: topic })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage(data.message, 'success');
+                document.getElementById('newTopic').value = '';
+                location.reload(); // 刷新页面以更新订阅列表
+            } else {
+                showMessage(data.message || '订阅失败', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('订阅失败:', error);
+            showMessage('网络错误，请重试', 'danger');
+        });
+    }
+
+    // 取消订阅主题
+    function unsubscribeTopic(topic) {
+        if (!confirm(`确定要取消订阅主题 "${topic}" 吗？`)) {
+            return;
+        }
+        
+        fetch('/unsubscribe-topic/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ topic: topic })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage(data.message, 'success');
+                location.reload(); // 刷新页面以更新订阅列表
+            } else {
+                showMessage(data.message || '取消订阅失败', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('取消订阅失败:', error);
+            showMessage('网络错误，请重试', 'danger');
+        });
+    }
+
+    // 显示消息内容
+    function showPayload(payload) {
+        document.getElementById('payloadContent').textContent = payload;
+        new bootstrap.Modal(document.getElementById('payloadModal')).show();
+    }
+
+    // 刷新消息列表
+    function refreshMessages() {
+        fetch('/api/messages/')
+            .then(response => response.json())
+            .then(data => {
+                const messageLog = document.getElementById('messageLog');
+                messageLog.innerHTML = '';
+                
+                if (data.messages.length === 0) {
+                    messageLog.innerHTML = `
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-inbox fa-3x mb-3"></i>
+                            <p>暂无消息记录</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                data.messages.forEach(message => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `p-3 mb-2 rounded ${message.message_type === 'sent' ? 'sent-message' : 'received-message'}`;
+                    messageDiv.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <strong><code>${message.topic}</code></strong>
+                                    <small class="text-muted">
+                                        ${message.message_type === 'sent' ? '<i class="fas fa-arrow-up text-primary"></i>' : '<i class="fas fa-arrow-down text-success"></i>'}
+                                        ${message.timestamp}
+                                    </small>
+                                </div>
+                                <div class="small">
+                                    <pre class="mb-0" style="white-space: pre-wrap;">${message.payload}</pre>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    messageLog.appendChild(messageDiv);
+                });
+            })
+            .catch(error => {
+                console.error('刷新消息失败:', error);
+            });
+    }
+
+    // 清空消息记录
+    function clearMessages() {
+        if (!confirm('确定要清空所有消息记录吗？此操作不可恢复。')) {
+            return;
+        }
+        
+        fetch('/api/clear-messages/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage(data.message, 'success');
+                refreshMessages();
+            } else {
+                showMessage(data.message || '清空消息失败', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('清空消息失败:', error);
+            showMessage('网络错误，请重试', 'danger');
+        });
+    }
+
+    // 页面加载完成后自动刷新消息
+    document.addEventListener('DOMContentLoaded', function() {
+        refreshMessages();
+        // 每15秒自动刷新一次消息
+        setInterval(refreshMessages, 15000);
+    });
+</script>
+{% endblock %} 
